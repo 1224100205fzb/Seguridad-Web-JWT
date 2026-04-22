@@ -1,31 +1,40 @@
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
-import mongoose from 'mongoose'; // Nuevo: Para la base de datos 
-import dotenv from 'dotenv'; // Nuevo: Para leer el archivo .env 
-import { usuarioRoutes } from './src/rutas/usuarios.js'; // Nuevo: Importar rutas JWT [cite: 282]
+import rateLimit from 'express-rate-limit';
+import { body, validationResult } from 'express-validator';
+import xss from 'xss-clean';
 
-dotenv.config(); // Carga la variable JWT_SECRET del .env 
-
-const app = express();
+const app = express(); // <--- ESTO ES LO QUE TE FALTABA
 app.use(express.json());
 app.use(helmet()); 
-app.use(cors({ origin: 'http://localhost:5173' }));
+app.use(cors());
 
-// 1. Integrar las rutas de usuario (Signup y Login)
-usuarioRoutes(app); // [cite: 283, 284]
-
-// 2. Tu ruta de comentarios anterior
-app.post('/comentarios', (req, res) => {
-  const { texto } = req.body;
-  res.json({ comentario: texto });
+// 1.1 Rate Limiting: Máximo 10 peticiones por minuto [cite: 200, 234]
+const limitador = rateLimit({
+  windowMs: 1 * 60 * 1000, 
+  max: 10, 
+  message: { error: 'Demasiadas peticiones, intenta más tarde (429)' }
 });
 
-// 3. Conexión a MongoDB y encendido del servidor
-// Asegúrate de tener MongoDB Compass abierto y conectado
-mongoose.connect('mongodb://127.0.0.1:27017/seguridad_utng')
-  .then(() => {
-    console.log('✅ Conectado a MongoDB');
-    app.listen(3000, () => console.log('🚀 Servidor corriendo en http://localhost:3000'));
-  })
-  .catch(err => console.error('❌ Error al conectar a MongoDB:', err));
+// Aplicar el limitador a la ruta específica [cite: 198]
+app.use('/api/v1/comentarios', limitador);
+
+// 1.2 Sanitización contra XSS [cite: 201, 234]
+app.use(xss()); 
+
+// 1.3 Validación de datos y Ruta POST [cite: 202, 234]
+app.post('/api/v1/comentarios', [
+  body('puntuacion').isInt().withMessage('La puntuación debe ser un número entero'),
+  body('texto').isLength({ max: 200 }).withMessage('El texto no puede superar los 200 caracteres')
+], (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({ errors: errors.array() });
+  }
+  
+  const { texto, puntuacion } = req.body;
+  res.json({ mensaje: "Comentario recibido de forma segura", texto, puntuacion });
+});
+
+app.listen(3000, () => console.log('🚀 Backend seguro en puerto 3000'));
